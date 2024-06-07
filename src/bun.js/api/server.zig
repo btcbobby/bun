@@ -5127,7 +5127,6 @@ pub const ServerWebSocket = struct {
         return ZigString.init(text).toValueGC(globalThis);
     }
 };
-extern fn RequestPrototype__signalGetCachedValue(JSC.JSValue) JSC.JSValue;
 pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comptime debug_mode_: bool) type {
     return struct {
         pub const ssl_enabled = ssl_enabled_;
@@ -6173,7 +6172,7 @@ pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comp
             response_value.ensureStillAlive();
             if (!response_value.isAnyError()) {
                 // JS signal is lazy created when needed and we need to keep it alive so we can call the events
-                const js_signal = RequestPrototype__signalGetCachedValue(request_value);
+                const js_signal = Request.signalGetCached(request_value) orelse .zero;
                 if (!js_signal.isEmptyOrUndefinedOrNull()) {
                     ctx.js_signal = JSC.Strong.create(js_signal, this.globalThis);
                 }

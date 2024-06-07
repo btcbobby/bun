@@ -6171,16 +6171,16 @@ pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comp
 
             const response_value = this.config.onRequest.callWithThis(this.globalThis, this.thisObject, &args);
             response_value.ensureStillAlive();
+            if (!response_value.isAnyError()) {
+                // JS signal is lazy created when needed and we need to keep it alive so we can call the events
+                const js_signal = RequestPrototype__signalGetCachedValue(request_value);
+                if (!js_signal.isEmptyOrUndefinedOrNull()) {
+                    ctx.js_signal = JSC.Strong.create(js_signal, this.globalThis);
+                }
+            }
             defer {
                 // uWS request will not live longer than this function
                 request_object.request_context = JSC.API.AnyRequestContext.Null;
-                if (!response_value.isAnyError()) {
-                    // JS signal is lazy created when needed and we need to keep it alive so we can call the events
-                    const js_signal = RequestPrototype__signalGetCachedValue(request_value);
-                    if (!js_signal.isEmptyOrUndefinedOrNull()) {
-                        ctx.js_signal = JSC.Strong.create(js_signal, this.globalThis);
-                    }
-                }
             }
 
             var should_deinit_context = false;

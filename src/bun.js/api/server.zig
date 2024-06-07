@@ -1325,6 +1325,8 @@ fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, comp
         allocator: std.mem.Allocator,
         req: *uws.Request,
         signal: ?*JSC.WebCore.AbortSignal = null,
+        // JS signal is lazy created when needed and we need to keep it alive so we can call the events
+        js_signal: JSC.Strong = .{},
         method: HTTP.Method,
 
         flags: NewFlags(debug_mode) = .{},
@@ -1761,12 +1763,17 @@ fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, comp
             this.flags.aborted = true;
             var any_js_calls = false;
             var vm = this.server.vm;
+            var js_signal = this.js_signal;
+            // we dont wanna deinit the signal inside finalizeWithoutDeinit in this case
+            // we will await vm.drainMicrotasks()
+            this.js_signal = .{};
             defer {
                 // This is a task in the event loop.
                 // If we called into JavaScript, we must drain the microtask queue
                 if (any_js_calls) {
                     vm.drainMicrotasks();
                 }
+                js_signal.deinit();
             }
 
             // if signal is not aborted, abort the signal
@@ -1844,6 +1851,7 @@ fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, comp
         pub fn finalizeWithoutDeinit(this: *RequestContext) void {
             ctxLog("finalizeWithoutDeinit<d> ({*})<r>", .{this});
             this.blob.detach();
+            this.js_signal.deinit();
 
             if (comptime Environment.allow_assert) {
                 ctxLog("finalizeWithoutDeinit: has_finalized {any}", .{this.flags.has_finalized});
@@ -5119,7 +5127,7 @@ pub const ServerWebSocket = struct {
         return ZigString.init(text).toValueGC(globalThis);
     }
 };
-
+extern fn RequestPrototype__signalGetCachedValue(JSC.JSValue) JSC.JSValue;
 pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comptime debug_mode_: bool) type {
     return struct {
         pub const ssl_enabled = ssl_enabled_;
@@ -6165,6 +6173,11 @@ pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comp
             defer {
                 // uWS request will not live longer than this function
                 request_object.request_context = JSC.API.AnyRequestContext.Null;
+                // JS signal is lazy created when needed and we need to keep it alive so we can call the events
+                const js_signal = RequestPrototype__signalGetCachedValue(request_value);
+                if (!js_signal.isEmptyOrUndefinedOrNull()) {
+                    ctx.js_signal = JSC.Strong.create(js_signal, this.globalThis);
+                }
             }
 
             var should_deinit_context = false;
@@ -6176,6 +6189,7 @@ pub fn NewServer(comptime NamespaceType: type, comptime ssl_enabled_: bool, comp
                 request_value,
                 response_value,
             );
+
             ctx.defer_deinit_until_callback_completes = null;
 
             if (should_deinit_context) {
